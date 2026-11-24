@@ -18,7 +18,7 @@ fn band_color(b: Band, p: &Pal) -> Color32 {
 
 /// A value that eases to its target: numbers glide instead of jumping.
 fn glide(ui: &Ui, key: &str, target: f32) -> f32 {
-    ui.ctx().animate_value_with_time(egui::Id::unique(("glide", key)), target, 0.45)
+    ui.ctx().animate_value_with_time(egui::Id::unique(("glide", key)), target, 0.2)
 }
 
 /// What a tile shows.
@@ -41,6 +41,15 @@ impl App {
     fn tile(&self, ui: &mut Ui, p: &Pal, label: &str, val: Val, band: Option<(Band, &str)>) -> bool {
         let t = self.s();
         let mut clicked = false;
+        // A reading this hardware can never give is hidden (it would be a permanent dash). A dash stays only for what
+        // needs an action (CPU temperature before Enable) or is just starting.
+        match &val {
+            Val::Text(..) => {
+                self.seen.borrow_mut().insert(label.to_string());
+            }
+            Val::Missing(Why::NotReported) if !self.seen.borrow().contains(label) => return false,
+            _ => {}
+        }
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
             ui.label(RichText::new(label).font(theme::reg(12.0)).color(p.muted));
@@ -304,10 +313,10 @@ impl App {
                             let b = band(SensorKind::Nvme, *v);
                             ui.label(RichText::new(format!("{v:.0} °C")).font(theme::mono(14.0)).color(band_color(b, p)));
                         }
-                        Some(Err(w)) => {
+                        Some(Err(w)) if *w != Why::NotReported => {
                             ui.label(RichText::new(crate::specs::DASH).font(theme::mono(14.0)).color(p.muted)).on_hover_text(why_text(t, *w));
                         }
-                        None => {}
+                        Some(Err(_)) | None => {}
                     };
                 });
             });
@@ -315,13 +324,16 @@ impl App {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 28.0;
                 ui.vertical(|ui| {
-                    ui.set_width(150.0);
-                    ui.label(RichText::new(t.activity).font(theme::reg(12.0)).color(p.muted));
-                    ui.add_space(2.0);
-                    let (r, _) = ui.allocate_exact_size(vec2(130.0, 8.0), Sense::hover());
-                    widgets::bar(ui.painter(), r, glide(ui, &format!("disk{i}"), d.busy) / 100.0, p.accent, widgets::track(p));
-                    ui.add_space(2.0);
-                    ui.label(RichText::new(format!("{:.0}%", d.busy)).font(theme::mono(13.0)).color(p.text));
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        ui.label(RichText::new(t.activity).font(theme::reg(12.0)).color(p.muted));
+                        ui.label(RichText::new(format!("{:.0}%", glide(ui, &format!("disk{i}"), d.busy))).font(theme::mono(12.0)).color(p.text));
+                    });
+                    let (rd, wr): (Vec<f32>, Vec<f32>) = self.hist.disks.get(i).map(|h| (h.0.iter().collect(), h.1.iter().collect())).unwrap_or_default();
+                    let max = rd.iter().chain(wr.iter()).cloned().fold(1_000_000.0, f32::max) * 1.1;
+                    let (r, _) = ui.allocate_exact_size(vec2(210.0, 40.0), Sense::hover());
+                    widgets::sparkline(ui.painter(), r, &[(&rd, p.accent), (&wr, p.text2)], max, p.line_hi);
                 });
                 self.tile(ui, p, t.read, Val::Text(fmt_rate(d.read), p.text), None);
                 self.tile(ui, p, t.write, Val::Text(fmt_rate(d.write), p.text), None);

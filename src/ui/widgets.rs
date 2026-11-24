@@ -260,18 +260,20 @@ pub fn sparkline(painter: &Painter, rect: Rect, series: &[(&[f32], Color32)], ma
         let off = n + 1 - data.len();
         let pts: Vec<Pos2> = data.iter().enumerate().map(|(k, v)| pos2(rect.left() + rect.width() * (k + off) as f32 / n as f32, rect.bottom() - 1.5 - (rect.height() - 3.0) * (v / max).clamp(0.0, 1.0))).collect();
         if i == 0 {
-            // Flat fill: thin vertical strips between the baseline and the line.
+            // Flat fill under the line: one mesh, a strip of quads between the line and the baseline.
             let fill = theme::alpha(*col, 30);
-            for w in pts.windows(2) {
-                let (a, b) = (w[0], w[1]);
-                let mut m = egui::epaint::Mesh::default();
-                for q in [a, b, pos2(b.x, rect.bottom() - 1.0), pos2(a.x, rect.bottom() - 1.0)] {
-                    m.colored_vertex(q, fill);
-                }
-                m.add_triangle(0, 1, 2);
-                m.add_triangle(0, 2, 3);
-                painter.add(Shape::mesh(m));
+            let base = rect.bottom() - 1.0;
+            let mut m = egui::epaint::Mesh::default();
+            for q in &pts {
+                m.colored_vertex(*q, fill);
+                m.colored_vertex(pos2(q.x, base), fill);
             }
+            for k in 0..(pts.len() as u32 - 1) {
+                let i = k * 2;
+                m.add_triangle(i, i + 1, i + 2);
+                m.add_triangle(i + 1, i + 3, i + 2);
+            }
+            painter.add(Shape::mesh(m));
         }
         painter.add(Shape::line(pts, PathStroke::new(1.6, *col)));
     }

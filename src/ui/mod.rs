@@ -87,6 +87,8 @@ pub struct App {
     pub specs: specs_page::State,
     pub settings: settings::State,
     pub access: access::State,
+    /// Readings that showed a value at least once this session; a reading the hardware never gives stays hidden.
+    pub seen: std::cell::RefCell<std::collections::HashSet<String>>,
     visible: Arc<AtomicBool>,
     cfg_dirty: Option<f64>,
     shots: Option<Shots>,
@@ -152,6 +154,7 @@ impl App {
             specs: specs_page::State::new(demo),
             settings: settings::State::new(),
             access: access::State::new(demo),
+            seen: Default::default(),
             visible,
             cfg_dirty,
             shots,

@@ -148,9 +148,11 @@ fn app_icon() -> egui::IconData {
 
 /// A console check of this computer's sensors: prints a few readings once a second.
 fn probe(secs: u32) {
+    #[cfg(windows)]
+    sensors::link::set_enabled(setup::is_enabled());
     let mut c = sensors::platform_collector();
     println!("Thermora probe, {secs} s");
-    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::thread::sleep(std::time::Duration::from_millis(3500));
     for i in 0..secs {
         let l = sensors::Collector::poll(&mut *c);
         let show = |r: &Option<model::Rd<f32>>| match r {
@@ -165,7 +167,7 @@ fn probe(secs: u32) {
             show(&l.cpu.temp),
             show(&l.cpu.hotspot),
             show(&l.cpu.power),
-            l.gpu.as_ref().map(|g| format!("{:.0}% {} C hot {}", g.load, show(&g.temp), show(&g.hotspot))).unwrap_or("-".into()),
+            l.gpu.as_ref().map(|g| format!("{:.0}% {} C hot {} mem {} power {} fan {}", g.load, show(&g.temp), show(&g.hotspot), show(&g.mem_temp), show(&g.power), show(&g.fan))).unwrap_or("-".into()),
             l.ram.used >> 20,
             l.ram.total >> 20,
             l.net.adapter,
@@ -174,4 +176,5 @@ fn probe(secs: u32) {
         );
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
+    println!("gpu power source: {}", sensors::nvidia::power_source());
 }

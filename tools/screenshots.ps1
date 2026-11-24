@@ -7,7 +7,7 @@ New-Item -ItemType Directory -Force $out | Out-Null
 $tmp = Join-Path $env:TEMP "thermora-shots-$PID"
 New-Item -ItemType Directory -Force $tmp | Out-Null
 $env:THERMORA_DATA_DIR = $tmp
-$env:THERMORA_WINDOW = '1280x940'
+$env:THERMORA_WINDOW = '1280x1160'
 $env:THERMORA_SHOT_WAIT = '60'
 
 function Shoot($theme, $lang, $navs, $select, $prefixExtra) {

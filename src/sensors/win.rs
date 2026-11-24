@@ -252,7 +252,7 @@ impl WinCollector {
         let pdh = Pdh::new(&[
             ("cpu_load", r"\Processor Information(*)\% Processor Time"),
             ("cpu_perf", r"\Processor Information(*)\% Processor Performance"),
-            ("disk_busy", r"\PhysicalDisk(*)\% Disk Time"),
+            ("disk_busy", r"\PhysicalDisk(*)\% Idle Time"),
             ("disk_r", r"\PhysicalDisk(*)\Disk Read Bytes/sec"),
             ("disk_w", r"\PhysicalDisk(*)\Disk Write Bytes/sec"),
             ("net_rx", r"\Network Interface(*)\Bytes Received/sec"),
@@ -320,7 +320,8 @@ impl WinCollector {
             let title = if d.model.is_empty() { format!("Disk {}", d.index) } else { d.model.clone() };
             out.push(DiskLive {
                 name: title,
-                busy: (*b as f32).clamp(0.0, 100.0),
+                // Task Manager's "Active time": 100 minus the idle time (% Disk Time is unreliable on NVMe).
+                busy: (100.0 - *b as f32).clamp(0.0, 100.0),
                 read: get(&rd),
                 write: get(&wr),
                 temp: Some(temp.map(|t| t as f32).ok_or(Why::NotReported)),

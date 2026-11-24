@@ -265,13 +265,15 @@ pub struct History {
     pub ram: Ring,
     pub down: Ring,
     pub up: Ring,
+    /// Per drive: (read, write) bytes per second.
+    pub disks: Vec<(Ring, Ring)>,
 }
 
 impl History {
     pub const POINTS: usize = 60;
     pub fn new() -> Self {
         let r = || Ring::new(Self::POINTS);
-        Self { cpu_load: r(), cpu_temp: r(), gpu_load: r(), gpu_temp: r(), ram: r(), down: r(), up: r() }
+        Self { cpu_load: r(), cpu_temp: r(), gpu_load: r(), gpu_temp: r(), ram: r(), down: r(), up: r(), disks: Vec::new() }
     }
 
     pub fn push(&mut self, l: &Live) {
@@ -288,6 +290,13 @@ impl History {
         self.ram.push(if l.ram.total > 0 { l.ram.used as f32 / l.ram.total as f32 * 100.0 } else { 0.0 });
         self.down.push(l.net.down as f32);
         self.up.push(l.net.up as f32);
+        while self.disks.len() < l.disks.len() {
+            self.disks.push((Ring::new(Self::POINTS), Ring::new(Self::POINTS)));
+        }
+        for (h, d) in self.disks.iter_mut().zip(&l.disks) {
+            h.0.push(d.read as f32);
+            h.1.push(d.write as f32);
+        }
     }
 }
 

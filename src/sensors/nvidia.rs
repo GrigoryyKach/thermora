@@ -6,6 +6,19 @@ use crate::specs::{Component, Field, Group};
 use nvml_wrapper::enum_wrappers::device::{Clock, TemperatureSensor};
 use nvml_wrapper::Nvml;
 
+/// Which source gave the GPU power draw this session (shown by `--probe`).
+static POWER_SOURCE: std::sync::Mutex<&'static str> = std::sync::Mutex::new("none");
+
+fn set_source(s: &'static str) {
+    if let Ok(mut g) = POWER_SOURCE.lock() {
+        *g = s;
+    }
+}
+
+pub fn power_source() -> &'static str {
+    POWER_SOURCE.lock().map(|g| *g).unwrap_or("none")
+}
+
 pub struct Nvidia {
     nvml: Nvml,
     #[cfg(windows)]
@@ -43,7 +56,7 @@ impl Nvidia {
             vram_used: mem.as_ref().map(|m| m.used).unwrap_or(0),
             vram_total: mem.as_ref().map(|m| m.total).unwrap_or(0),
             clock_mhz: Some(rd(d.clock_info(Clock::Graphics)).map(|c| c as f32)),
-            power: Some(rd(d.power_usage()).map(|p| p as f32 / 1000.0)),
+            power: Some(self.power(&d).ok_or(Why::NotReported)),
             power_limit: Some(rd(d.enforced_power_limit()).map(|p| p as f32 / 1000.0)),
             fan: Some(rd(d.fan_speed(0)).map(|f| f as f32)),
         };
@@ -63,6 +76,42 @@ impl Nvidia {
             }
         }
         Some(g)
+    }
+
+    /// GPU power in watts. Tries, in order: NVML instantaneous power, NVML field values (instant, then average),
+    /// then the private NvAPI power topology (a percentage of the board's power limit) times the limit.
+    fn power(&self, d: &nvml_wrapper::Device) -> Option<f32> {
+        if let Ok(mw) = d.power_usage() {
+            set_source("NVML power_usage");
+            return Some(mw as f32 / 1000.0);
+        }
+        use nvml_wrapper::structs::device::FieldId;
+        for (id, name) in [(186u32, "NVML field POWER_INSTANT"), (185, "NVML field POWER_AVERAGE")] {
+            if let Ok(v) = d.field_values_for(&[FieldId(id)]) {
+                if let Some(Ok(sample)) = v.into_iter().next() {
+                    use nvml_wrapper::enums::device::SampleValue::*;
+                    let mw = match sample.value {
+                        Ok(U32(x)) => x as f64,
+                        Ok(U64(x)) => x as f64,
+                        Ok(I64(x)) => x as f64,
+                        Ok(F64(x)) => x,
+                        _ => continue,
+                    };
+                    if mw > 0.0 {
+                        set_source(name);
+                        return Some(mw as f32 / 1000.0);
+                    }
+                }
+            }
+        }
+        #[cfg(windows)]
+        if let (Some(api), Ok(limit)) = (&self.nvapi, d.enforced_power_limit()) {
+            if let Some(pct) = api.power_percent() {
+                set_source("NvAPI power topology x limit");
+                return Some(pct / 100.0 * (limit as f32 / 1000.0));
+            }
+        }
+        None
     }
 
     pub fn specs(&self) -> Vec<Component> {
@@ -113,6 +162,7 @@ mod nvapi {
         _lib: Library,
         gpu: *mut c_void,
         get_sensors: unsafe extern "C" fn(*mut c_void, *mut Sensors) -> i32,
+        get_power: Option<unsafe extern "C" fn(*mut c_void, *mut PowerTopology) -> i32>,
         mask: u32,
     }
 
@@ -125,6 +175,14 @@ mod nvapi {
         mask: u32,
         reserved: [i32; 8],
         temps: [i32; 32],
+    }
+
+    #[repr(C)]
+    struct PowerTopology {
+        version: u32,
+        count: u32,
+        /// (domain, reserved, power in thousandths of a percent of the power limit, reserved) x 4
+        entries: [[u32; 4]; 4],
     }
 
     type Query = unsafe extern "C" fn(u32) -> *const c_void;
@@ -151,7 +209,9 @@ mod nvapi {
                     return None;
                 }
                 let get_sensors: unsafe extern "C" fn(*mut c_void, *mut Sensors) -> i32 = std::mem::transmute(sensors);
-                let mut api = NvApi { _lib: lib, gpu: handles[0], get_sensors, mask: 0 };
+                let power = q(0xEDCF624E);
+                let get_power = if power.is_null() { None } else { Some(std::mem::transmute::<*const c_void, unsafe extern "C" fn(*mut c_void, *mut PowerTopology) -> i32>(power)) };
+                let mut api = NvApi { _lib: lib, gpu: handles[0], get_sensors, get_power, mask: 0 };
                 // Same probing as LibreHardwareMonitor: grow the mask bit by bit until the call fails.
                 let mut s = Sensors { version: (std::mem::size_of::<Sensors>() as u32) | (2 << 16), mask: 0, reserved: [0; 8], temps: [0; 32] };
                 for bit in 0..32 {
@@ -163,6 +223,18 @@ mod nvapi {
                 }
                 (api.mask != 0).then_some(api)
             }
+        }
+
+        /// Board power as a percentage of the power limit (NvAPI_GPU_ClientPowerTopologyGetStatus, domain 0 = GPU).
+        pub fn power_percent(&self) -> Option<f32> {
+            let f = self.get_power?;
+            let mut t = PowerTopology { version: (std::mem::size_of::<PowerTopology>() as u32) | (1 << 16), count: 0, entries: [[0; 4]; 4] };
+            // SAFETY: valid handle and a struct of the version we pass; the status is checked.
+            if unsafe { f(self.gpu, &mut t) } != 0 || t.count == 0 {
+                return None;
+            }
+            let e = t.entries.iter().take(t.count.min(4) as usize).find(|e| e[0] == 0 && e[2] > 0)?;
+            Some(e[2] as f32 / 1000.0)
         }
 
         pub fn thermal_sensors(&self) -> Result<[i32; 32], i32> {
