@@ -38,6 +38,21 @@ pub fn slot_sample(text: &str) -> &str {
     }
 }
 
+/// The gauge beside its stats when the card is wide enough, above them when it is narrow.
+fn ring_and_stats(ui: &mut Ui, ring: &mut dyn FnMut(&mut Ui), stats: &mut dyn FnMut(&mut Ui)) {
+    if ui.available_width() < 372.0 {
+        ring(ui);
+        ui.add_space(10.0);
+        stats(ui);
+    } else {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 20.0;
+            ring(ui);
+            ui.vertical(|ui| stats(ui));
+        });
+    }
+}
+
 fn text_w(ui: &Ui, s: &str, font: egui::FontId) -> f32 {
     ui.painter().layout_no_wrap(s.to_string(), font, Color32::WHITE).size().x
 }
@@ -172,10 +187,8 @@ impl App {
         let kind = SensorKind::from(c.vendor);
         let mut enable = false;
         self.card_header(ui, p, Icon::Cpu, t.card_cpu, "");
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 20.0;
-            self.ring_gauge(ui, p, "cpu-load", c.load, t.load, 140.0);
-            ui.vertical(|ui| {
+        ring_and_stats(ui, &mut |ui| self.ring_gauge(ui, p, "cpu-load", c.load, t.load, if ui.available_width() < 440.0 { 120.0 } else { 140.0 }), &mut |ui| {
+            {
                 ui.spacing_mut().item_spacing.y = 12.0;
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = 30.0;
@@ -199,7 +212,7 @@ impl App {
                     let power = from_rd(&c.power, |w| Val::Text(format!("{:.1} W", glide(ui, "cpu-power", w)), p.text));
                     enable |= self.tile(ui, p, t.power, power, None);
                 });
-            });
+            }
         });
         ui.add_space(12.0);
         ui.label(RichText::new(t.per_core).font(theme::reg(12.0)).color(p.muted));
@@ -220,8 +233,8 @@ impl App {
         if cores.is_empty() {
             return;
         }
-        let gap = 3.0;
         let n = cores.len() as f32;
+        let gap = if n > 32.0 { 1.0 } else { 3.0 };
         let w = ((rect.width() - gap * (n - 1.0)) / n).clamp(3.0, 40.0);
         let total = w * n + gap * (n - 1.0);
         let x0 = rect.left() + (rect.width() - total).max(0.0) / 2.0 * 0.0;
@@ -242,10 +255,8 @@ impl App {
             return;
         };
         self.card_header(ui, p, Icon::Gpu, t.card_gpu, &g.name);
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 20.0;
-            self.ring_gauge(ui, p, "gpu-load", g.load, t.load, 140.0);
-            ui.vertical(|ui| {
+        ring_and_stats(ui, &mut |ui| self.ring_gauge(ui, p, "gpu-load", g.load, t.load, if ui.available_width() < 440.0 { 120.0 } else { 140.0 }), &mut |ui| {
+            {
                 ui.spacing_mut().item_spacing.y = 8.0;
                 let temp = from_rd(&g.temp, |v| Val::Text(format!("{:.0} °C", glide(ui, "gpu-temp", v)), band_color(band(SensorKind::Gpu, v), p)));
                 let tb = g.temp.as_ref().and_then(|r| r.as_ref().ok()).map(|v| (band(SensorKind::Gpu, *v), band_name(t, band(SensorKind::Gpu, *v))));
@@ -274,7 +285,7 @@ impl App {
                     let fan = from_rd(&g.fan, |f| Val::Text(format!("{:.0}%", f), p.text));
                     self.tile(ui, p, t.fan, fan, None);
                 });
-            });
+            }
         });
         ui.add_space(12.0);
         ui.horizontal(|ui| {
@@ -450,8 +461,11 @@ impl App {
                 });
                 ui.add_space(14.0);
             }
-            // Two columns only when each card has room for its widest row (about 430 px inside); below that, one column.
-            let wide = ui.available_width() >= 950.0;
+            // Two columns from about 790 px of usable width (a window of about 1120 px; the default 1180 has ~868); below that, one column. When a
+            // card's inside is narrower than 372 px its gauge moves above its stats, so nothing overflows.
+            let wide = ui.available_width() >= 790.0;
+            let narrow_cards = wide && (ui.available_width() - 14.0) / 2.0 - 34.0 < 372.0;
+            let top_h = if narrow_cards { 500.0 } else { 372.0 };
             let card = |ui: &mut Ui, h: f32, add: &mut dyn FnMut(&mut Ui)| {
                 theme::card(p).inner_margin(Margin::same(16)).show(ui, |ui| {
                     // Exactly the width the grid gives: never wider, whatever the content, and clipped as a last resort.
@@ -471,8 +485,8 @@ impl App {
                 ui.columns(2, |cols| {
                     cols[0].spacing_mut().item_spacing.y = gap;
                     cols[1].spacing_mut().item_spacing.y = gap;
-                    card(&mut cols[0], 372.0, &mut |ui| enable |= self.cpu_card(ui, p));
-                    card(&mut cols[1], 372.0, &mut |ui| self.gpu_card(ui, p));
+                    card(&mut cols[0], top_h, &mut |ui| enable |= self.cpu_card(ui, p));
+                    card(&mut cols[1], top_h, &mut |ui| self.gpu_card(ui, p));
                 });
                 ui.add_space(gap);
                 ui.columns(2, |cols| {
