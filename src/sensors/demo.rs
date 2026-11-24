@@ -30,7 +30,7 @@ impl Collector for DemoCollector {
         // THERMORA_DEMO_NOACCESS=1 (test folder only): the state before the CPU temperature access is enabled.
         let no_access = crate::config::is_test_instance() && std::env::var("THERMORA_DEMO_NOACCESS").is_ok();
         let missing: Option<Rd<f32>> = Some(Err(Why::NeedsCpuAccess));
-        Live {
+        let mut live = Live {
             cpu: CpuLive {
                 vendor: CpuVendor::Intel,
                 load,
@@ -75,7 +75,41 @@ impl Collector for DemoCollector {
             ],
             cpu_access_missing: no_access,
             ready: true,
+        };
+        if crate::config::is_test_instance() && std::env::var("THERMORA_DEMO_EXTREME").is_ok() {
+            extremes(&mut live);
         }
+        live
+    }
+}
+
+/// THERMORA_DEMO_EXTREME=1 (test folder only): the longest numbers and names, to check that no card changes width.
+fn extremes(l: &mut Live) {
+    l.cpu.clock_mhz = Some(9990.0);
+    l.cpu.temp = Some(Ok(100.0));
+    l.cpu.hotspot = Some(Ok(100.0));
+    l.cpu.power = Some(Ok(999.9));
+    if let Some(g) = &mut l.gpu {
+        g.name = "NVIDIA GeForce RTX 4090 Founders Edition Collector".into();
+        g.temp = Some(Ok(100.0));
+        g.hotspot = Some(Ok(100.0));
+        g.mem_temp = Some(Ok(100.0));
+        g.clock_mhz = Some(Ok(9990.0));
+        g.power = Some(Ok(999.0));
+        g.power_limit = Some(Ok(999.0));
+        g.fan = Some(Ok(100.0));
+        g.vram_used = 99 * 1024 * 1024 * 1024;
+        g.vram_total = 99 * 1024 * 1024 * 1024;
+    }
+    l.ram = RamLive { total: 999 * 1024 * 1024 * 1024, used: 999 * 1024 * 1024 * 1024, available: 999 * 1024 * 1024 * 1024, cached: 999 * 1024 * 1024 * 1024 };
+    l.net = NetLive { adapter: "Intel(R) Ethernet Controller I225-V Extremely Long Adapter Name Number 12345".into(), down: 999.9e6, up: 10.0e9 };
+    for (i, d) in l.disks.iter_mut().enumerate() {
+        d.name = format!("Very Long Manufacturer Name Enterprise NVMe PCIe Gen5 x4 SSD 16 TB Edition {i}");
+        d.busy = 100.0;
+        d.read = if i == 0 { 65.5e3 } else { 999.9e6 };
+        d.write = if i == 0 { 10.1e6 } else { 10.0e9 };
+        d.temp = Some(Ok(100.0));
+        d.volumes = ["C:", "D:", "E:", "F:"].iter().map(|n| VolumeLive { name: n.to_string(), fs: "NTFS".into(), total: 999 * 1024 * 1024 * 1024, free: 999 * 1024 * 1024 * 1024 }).collect();
     }
 }
 

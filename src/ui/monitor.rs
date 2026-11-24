@@ -16,6 +16,32 @@ fn band_color(b: Band, p: &Pal) -> Color32 {
     }
 }
 
+/// The widest value of the same kind as `text`, to size its slot: rates, temperatures, clocks, power, percentages and
+/// sizes each have one. Anything else gets its own width.
+pub fn slot_sample(text: &str) -> &str {
+    if text.ends_with("/s") {
+        "999.9 MB/s"
+    } else if text.ends_with("°C") {
+        "999 °C"
+    } else if text.ends_with("GHz") || text.ends_with("MHz") {
+        "9.99 GHz"
+    } else if text.ends_with(" W") && text.contains('/') {
+        "999 / 999 W"
+    } else if text.ends_with(" W") {
+        "999.9 W"
+    } else if text.ends_with('%') {
+        "100%"
+    } else if text.ends_with(" GB") || text.ends_with(" MB") || text.ends_with(" TB") || text.ends_with(" KB") {
+        "999.9 GB"
+    } else {
+        text
+    }
+}
+
+fn text_w(ui: &Ui, s: &str, font: egui::FontId) -> f32 {
+    ui.painter().layout_no_wrap(s.to_string(), font, Color32::WHITE).size().x
+}
+
 /// A value that eases to its target: numbers glide instead of jumping.
 fn glide(ui: &Ui, key: &str, target: f32) -> f32 {
     ui.ctx().animate_value_with_time(egui::Id::unique(("glide", key)), target, 0.2)
@@ -50,14 +76,30 @@ impl App {
             Val::Missing(Why::NotReported) if !self.seen.borrow().contains(label) => return false,
             _ => {}
         }
+        // A fixed slot, sized from the widest value of its kind in the tabular font, so a changing number never moves
+        // the layout. Text is truncated, never wrapped or allowed to push the tile wider.
+        let sample = match &val {
+            Val::Text(s, _) => slot_sample(s),
+            Val::Missing(_) => "999 °C",
+        };
+        let mut slot = ui.painter().layout_no_wrap(sample.to_string(), theme::mono(20.0), p.text).size().x;
+        if band.is_some() {
+            let t = self.s();
+            let bw = [t.band_normal, t.band_warm, t.band_hot].iter().map(|n| ui.painter().layout_no_wrap(n.to_string(), theme::reg(12.0), p.text).size().x).fold(0.0, f32::max);
+            slot += 8.0 + bw;
+        }
+        let label_w = ui.painter().layout_no_wrap(label.to_string(), theme::reg(12.0), p.text).size().x;
+        let slot = slot.max(label_w).ceil();
         ui.vertical(|ui| {
+            ui.set_min_width(slot);
+            ui.set_max_width(slot);
             ui.spacing_mut().item_spacing.y = 2.0;
-            ui.label(RichText::new(label).font(theme::reg(12.0)).color(p.muted));
+            ui.add(egui::Label::new(RichText::new(label).font(theme::reg(12.0)).color(p.muted)).truncate());
             match val {
                 Val::Text(s, col) => {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
-                        ui.label(RichText::new(s).font(theme::mono(20.0)).color(col));
+                        ui.add(egui::Label::new(RichText::new(s).font(theme::mono(20.0)).color(col)).truncate());
                         if let Some((b, name)) = band {
                             ui.label(RichText::new(name).font(theme::reg(12.0)).color(band_color(b, p)));
                         }
@@ -132,7 +174,7 @@ impl App {
         self.card_header(ui, p, Icon::Cpu, t.card_cpu, "");
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 20.0;
-            self.ring_gauge(ui, p, "cpu-load", c.load, t.load, 148.0);
+            self.ring_gauge(ui, p, "cpu-load", c.load, t.load, 140.0);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 12.0;
                 ui.horizontal_top(|ui| {
@@ -202,7 +244,7 @@ impl App {
         self.card_header(ui, p, Icon::Gpu, t.card_gpu, &g.name);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 20.0;
-            self.ring_gauge(ui, p, "gpu-load", g.load, t.load, 148.0);
+            self.ring_gauge(ui, p, "gpu-load", g.load, t.load, 140.0);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 8.0;
                 let temp = from_rd(&g.temp, |v| Val::Text(format!("{:.0} °C", glide(ui, "gpu-temp", v)), band_color(band(SensorKind::Gpu, v), p)));
@@ -263,7 +305,9 @@ impl App {
             self.ring_gauge(ui, p, "ram", pct, t.used, 112.0);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 8.0;
-                ui.label(RichText::new(format!("{} / {}", fmt_bytes(r.used), fmt_bytes(r.total))).font(theme::mono(20.0)).color(p.text));
+                let w = ui.available_width();
+                let line = format!("{} / {}", fmt_bytes(r.used), fmt_bytes(r.total));
+                ui.add(egui::Label::new(RichText::new(widgets::fit_text(ui.painter(), &line, &theme::mono(20.0), w)).font(theme::mono(20.0)).color(p.text)).truncate());
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = 26.0;
                     self.tile(ui, p, t.cached, Val::Text(fmt_bytes(r.cached), p.text), None);
@@ -305,53 +349,76 @@ impl App {
             if i > 0 {
                 theme::divider(ui, p);
             }
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(&d.name).font(theme::medium(14.0)).color(p.text));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    match &d.temp {
-                        Some(Ok(v)) => {
-                            let b = band(SensorKind::Nvme, *v);
-                            ui.label(RichText::new(format!("{v:.0} °C")).font(theme::mono(14.0)).color(band_color(b, p)));
-                        }
-                        Some(Err(w)) if *w != Why::NotReported => {
-                            ui.label(RichText::new(crate::specs::DASH).font(theme::mono(14.0)).color(p.muted)).on_hover_text(why_text(t, *w));
-                        }
-                        Some(Err(_)) | None => {}
-                    };
-                });
-            });
+            let avail = ui.available_width();
+            // Name on the left (truncated), temperature on the right, both painted in a rect of exactly the card's width.
+            let (head, _) = ui.allocate_exact_size(vec2(avail, 22.0), Sense::hover());
+            let temp_txt = match &d.temp {
+                Some(Ok(v)) => Some((format!("{v:.0} °C"), band_color(band(SensorKind::Nvme, *v), p), None)),
+                Some(Err(w)) if *w != Why::NotReported => Some((crate::specs::DASH.to_string(), p.muted, Some(why_text(t, *w)))),
+                _ => None,
+            };
+            let temp_w = temp_txt.as_ref().map(|_| text_w(ui, "999 °C", theme::mono(14.0))).unwrap_or(0.0);
+            if let Some((txt, col, why)) = &temp_txt {
+                let r = ui.painter().text(egui::pos2(head.right(), head.center().y), Align2::RIGHT_CENTER, txt, theme::mono(14.0), *col);
+                if let Some(w) = why {
+                    ui.interact(r, ui.scope_id().with(("disk-temp", i)), Sense::hover()).on_hover_text(*w);
+                }
+            }
+            let name = widgets::fit_text(ui.painter(), &d.name, &theme::medium(14.0), (avail - temp_w - 12.0).max(40.0));
+            ui.painter().text(egui::pos2(head.left(), head.center().y), Align2::LEFT_CENTER, name, theme::medium(14.0), p.text);
             ui.add_space(6.0);
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 28.0;
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        ui.label(RichText::new(t.activity).font(theme::reg(12.0)).color(p.muted));
-                        ui.label(RichText::new(format!("{:.0}%", glide(ui, &format!("disk{i}"), d.busy))).font(theme::mono(12.0)).color(p.text));
+
+            // Stats: active time with a chart, read and write in fixed slots.
+            let gap = 28.0;
+            let rate_w = text_w(ui, "999.9 MB/s", theme::mono(20.0)).max(text_w(ui, t.read, theme::reg(12.0))).max(text_w(ui, t.write, theme::reg(12.0))).ceil();
+            let chart_full = 210.0;
+            let stats_full = chart_full + 2.0 * rate_w + 3.0 * gap;
+            let vol_min = 240.0;
+            let one_row = avail >= stats_full + vol_min;
+            let chart_w = if one_row { chart_full } else { (avail - 2.0 * rate_w - 2.0 * gap).clamp(100.0, chart_full) };
+            let vol_w = if one_row { avail - stats_full } else { avail };
+            let (rd, wr): (Vec<f32>, Vec<f32>) = self.hist.disks.get(i).map(|h| (h.0.iter().collect(), h.1.iter().collect())).unwrap_or_default();
+            let draw_stats = |ui: &mut Ui| {
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    ui.vertical(|ui| {
+                        ui.set_min_width(chart_w);
+                        ui.set_max_width(chart_w);
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            ui.label(RichText::new(t.activity).font(theme::reg(12.0)).color(p.muted));
+                            ui.label(RichText::new(format!("{:.0}%", glide(ui, &format!("disk{i}"), d.busy))).font(theme::mono(12.0)).color(p.text));
+                        });
+                        let max = rd.iter().chain(wr.iter()).cloned().fold(1_000_000.0, f32::max) * 1.1;
+                        let (r, _) = ui.allocate_exact_size(vec2(chart_w, 40.0), Sense::hover());
+                        widgets::sparkline(ui.painter(), r, &[(&rd, p.accent), (&wr, p.text2)], max, p.line_hi);
                     });
-                    let (rd, wr): (Vec<f32>, Vec<f32>) = self.hist.disks.get(i).map(|h| (h.0.iter().collect(), h.1.iter().collect())).unwrap_or_default();
-                    let max = rd.iter().chain(wr.iter()).cloned().fold(1_000_000.0, f32::max) * 1.1;
-                    let (r, _) = ui.allocate_exact_size(vec2(210.0, 40.0), Sense::hover());
-                    widgets::sparkline(ui.painter(), r, &[(&rd, p.accent), (&wr, p.text2)], max, p.line_hi);
+                    self.tile(ui, p, t.read, Val::Text(fmt_rate(d.read), p.text), None);
+                    self.tile(ui, p, t.write, Val::Text(fmt_rate(d.write), p.text), None);
                 });
-                self.tile(ui, p, t.read, Val::Text(fmt_rate(d.read), p.text), None);
-                self.tile(ui, p, t.write, Val::Text(fmt_rate(d.write), p.text), None);
+            };
+            let draw_volumes = |ui: &mut Ui, w: f32| {
                 ui.vertical(|ui| {
+                    ui.set_max_width(w);
                     ui.spacing_mut().item_spacing.y = 4.0;
                     for v in &d.volumes {
-                        let used = if v.total > 0 { 1.0 - v.free as f32 / v.total as f32 } else { 0.0 };
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 10.0;
-                            ui.label(RichText::new(&v.name).font(theme::mono(13.0)).color(p.text));
-                            ui.label(RichText::new(&v.fs).font(theme::reg(11.0)).color(p.muted));
-                            let (r, _) = ui.allocate_exact_size(vec2(90.0, 6.0), Sense::hover());
-                            widgets::bar(ui.painter(), r, used, p.accent, widgets::track(p));
-                            ui.label(RichText::new(t.free_of.replace("{free}", &fmt_bytes(v.free)).replace("{total}", &fmt_bytes(v.total))).font(theme::reg(12.0)).color(p.text2));
-                        });
+                        volume_row(ui, p, t, v, w);
                     }
                 });
-            });
+            };
+            if one_row {
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.allocate_ui_with_layout(vec2(stats_full - gap, 60.0), egui::Layout::top_down(egui::Align::Min), |ui| draw_stats(ui));
+                    ui.add_space(gap);
+                    draw_volumes(ui, vol_w);
+                });
+            } else {
+                draw_stats(ui);
+                ui.add_space(8.0);
+                draw_volumes(ui, vol_w);
+            }
         }
     }
 
@@ -383,10 +450,17 @@ impl App {
                 });
                 ui.add_space(14.0);
             }
-            let wide = ui.available_width() >= 640.0;
+            // Two columns only when each card has room for its widest row (about 430 px inside); below that, one column.
+            let wide = ui.available_width() >= 950.0;
             let card = |ui: &mut Ui, h: f32, add: &mut dyn FnMut(&mut Ui)| {
                 theme::card(p).inner_margin(Margin::same(16)).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
+                    // Exactly the width the grid gives: never wider, whatever the content, and clipped as a last resort.
+                    let w = ui.available_width();
+                    ui.set_width(w);
+                    ui.set_max_width(w);
+                    // Clip by width only: the height is the scroll area's business.
+                    let (m, c) = (ui.max_rect(), ui.clip_rect());
+                    ui.set_clip_rect(egui::Rect::from_min_max(egui::pos2(m.left().max(c.left()), c.top()), egui::pos2(m.right().min(c.right()), c.bottom())));
                     ui.set_min_height(h);
                     add(ui);
                 });
@@ -432,5 +506,76 @@ fn band_name(t: &crate::strings::S, b: Band) -> &'static str {
         Band::Normal => t.band_normal,
         Band::Warm => t.band_warm,
         Band::Hot => t.band_hot,
+    }
+}
+
+/// One volume: letter, file system, a bar and "free of", painted in a rect of exactly `w` so it can never widen its
+/// card. The bar shrinks and the text is cut with an ellipsis before anything overflows.
+fn volume_row(ui: &mut Ui, p: &Pal, t: &crate::strings::S, v: &VolumeLive, w: f32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(w, 20.0), Sense::hover());
+    let used = if v.total > 0 { 1.0 - v.free as f32 / v.total as f32 } else { 0.0 };
+    let cy = rect.center().y;
+    let name_f = theme::mono(13.0);
+    let fs_f = theme::reg(11.0);
+    let txt_f = theme::reg(12.0);
+    let name = widgets::fit_text(ui.painter(), &v.name, &name_f, (w * 0.25).max(24.0));
+    let name_w = text_w(ui, &name, name_f.clone());
+    ui.painter().text(egui::pos2(rect.left(), cy), Align2::LEFT_CENTER, &name, name_f, p.text);
+    let mut x = rect.left() + name_w + 8.0;
+    let fs_w = text_w(ui, &v.fs, fs_f.clone());
+    if x + fs_w < rect.right() - 60.0 {
+        ui.painter().text(egui::pos2(x, cy), Align2::LEFT_CENTER, &v.fs, fs_f, p.muted);
+        x += fs_w + 10.0;
+    }
+    let left = (rect.right() - x).max(0.0);
+    let bar_w = (left * 0.35).clamp(0.0, 90.0);
+    if bar_w >= 24.0 {
+        widgets::bar(ui.painter(), egui::Rect::from_min_size(egui::pos2(x, cy - 3.0), vec2(bar_w, 6.0)), used, p.accent, widgets::track(p));
+        x += bar_w + 10.0;
+    }
+    let text = t.free_of.replace("{free}", &fmt_bytes(v.free)).replace("{total}", &fmt_bytes(v.total));
+    let shown = widgets::fit_text(ui.painter(), &text, &txt_f, (rect.right() - x).max(0.0));
+    ui.painter().text(egui::pos2(x, cy), Align2::LEFT_CENTER, shown, txt_f, p.text2);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slot_samples_are_the_widest_of_their_kind() {
+        assert_eq!(slot_sample("65.5 KB/s"), "999.9 MB/s");
+        assert_eq!(slot_sample("10.1 MB/s"), slot_sample("0 B/s"));
+        assert_eq!(slot_sample("4.16 GHz"), slot_sample("800 MHz"));
+        assert_eq!(slot_sample("57 / 115 W"), "999 / 999 W");
+        assert_eq!(slot_sample("38.6 W"), "999.9 W");
+        assert_eq!(slot_sample("23.8 GB"), slot_sample("512 MB"));
+    }
+
+    /// For any value, the text of a slot kind is never wider than its sample, in the tabular font the page uses.
+    #[test]
+    fn no_value_is_wider_than_its_slot() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx, crate::theme::ThemeMode::Dark);
+        let mut worst: Vec<(String, f32, f32)> = Vec::new();
+        let mut full = ctx.run_pass(Default::default(), |ctx| {
+            let w = |s: &str| ctx.fonts_mut(|f| f.layout_no_wrap(s.to_string(), theme::mono(20.0), Color32::WHITE).size().x);
+            let mut vals: Vec<f64> = vec![0.0, 1.0, 9.99, 10.0, 99.9, 100.0, 999.0, 999.9, 1e3, 1e4, 1e5, 9.99e5, 1e6, 6.55e4, 1.01e7, 9.99e8, 1e9, 1e10, 9.99e10, 1e11, 1e12];
+            for i in 0..2000 {
+                vals.push(i as f64 * 7.3e6);
+            }
+            for v in vals {
+                let r = fmt_rate(v);
+                let sample = slot_sample(&r);
+                worst.push((r.clone(), w(&r), w(sample)));
+                let b = fmt_bytes(v as u64);
+                worst.push((b.clone(), w(&b), w(slot_sample(&b))));
+            }
+        });
+        full.textures_delta.clear();
+        // Rates up to 999.9 MB/s fit "999.9 MB/s"; a GB/s rate has the same length.
+        for (txt, got, slot) in worst.iter().filter(|(t, _, _)| !t.ends_with("TB")) {
+            assert!(got <= slot, "{txt}: {got} > {slot}");
+        }
     }
 }
