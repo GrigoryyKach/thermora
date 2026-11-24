@@ -1,0 +1,29 @@
+[package]
+name = "thermora"
+version = "0.1.0"
+edition = "2021"
+description = "A hardware monitor: load, temperatures and specs of every component (T1 sensor prototype)"
+
+[[bin]]
+name = "Thermora"
+path = "src/main.rs"
+
+[dependencies]
+nvml-wrapper = "0.11"
+libloading = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+wmi = "0.14"
+serde = { version = "1", features = ["derive"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_Performance",
+    "Win32_System_ProcessStatus", "Win32_System_Power", "Win32_Storage_FileSystem", "Win32_System_IO",
+    "Win32_System_Ioctl", "Win32_Security", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock", "Win32_System_Services", "Win32_System_Registry",
+] }
+
+[profile.release]
+opt-level = 3
+strip = true
+lto = true
+codegen-units = 1
