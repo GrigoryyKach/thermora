@@ -111,6 +111,12 @@ impl App {
         }
         theme::set_accent(ACCENT);
         theme::install(&cc.egui_ctx, cfg.theme);
+        // Screenshots may force a display scale (test folder only), to check the logo at 1x and 1.5x.
+        if crate::config::is_test_instance() {
+            if let Some(v) = std::env::var("THERMORA_SCALE").ok().and_then(|v| v.parse::<f32>().ok()) {
+                cc.egui_ctx.set_pixels_per_point(v);
+            }
+        }
         cc.egui_ctx.all_styles_mut(|s| s.spacing.interact_size.y = widgets::ROW_BTN_H);
         let lang = i18n::resolve(cfg.language.as_deref());
         let mut cfg_dirty = None;
@@ -381,8 +387,7 @@ impl App {
         let ctx = ui.ctx().clone();
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            let (mark, _) = ui.allocate_exact_size(egui::vec2(28.0, 36.0), Sense::hover());
-            widgets::mark_glyph(ui.painter(), mark.center(), p.accent);
+            widgets::app_icon(ui, 32.0);
             ui.label(egui::RichText::new("Thermora").font(theme::medium(18.0)).color(p.text));
         });
         ui.add_space(16.0);

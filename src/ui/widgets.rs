@@ -141,14 +141,41 @@ pub fn icon(p: &Painter, ic: Icon, c: Pos2, size: f32, col: Color32) {
     }
 }
 
-/// The Thermora mark: a thermometer with two ticks, drawn in a 16 px box around `c`.
-pub fn mark_glyph(painter: &Painter, c: Pos2, col: Color32) {
-    let st = Stroke::new(1.5, col);
-    painter.rect_stroke(Rect::from_center_size(c + vec2(-1.5, -2.2), vec2(4.2, 10.0)), 2.1, st, StrokeKind::Middle);
-    painter.circle_filled(c + vec2(-1.5, 4.6), 3.4, col);
-    painter.line_segment([c + vec2(-1.5, 4.6), c + vec2(-1.5, -2.5)], Stroke::new(1.8, col));
-    painter.line_segment([c + vec2(2.6, -4.0), c + vec2(5.0, -4.0)], st);
-    painter.line_segment([c + vec2(2.6, -0.5), c + vec2(5.0, -0.5)], st);
+/// The official artwork, pre-rendered at the sizes that land on whole pixels at 1x, 1.25x, 1.5x, 2x and 3x for a
+/// 32 px logo. They come from `tasks/icons/thermora` (the same master as the launcher and window icon).
+const ICONS: [(u32, &[u8]); 5] = [
+    (32, include_bytes!("../../assets/icons/icon-32.png")),
+    (40, include_bytes!("../../assets/icons/icon-40.png")),
+    (48, include_bytes!("../../assets/icons/icon-48.png")),
+    (64, include_bytes!("../../assets/icons/icon-64.png")),
+    (128, include_bytes!("../../assets/icons/icon-128.png")),
+];
+
+/// Draws the app icon `size` points wide from the real artwork: the nearest pre-rendered size for this screen's
+/// density, placed on the pixel grid so its edges stay sharp.
+pub fn app_icon(ui: &mut Ui, size: f32) -> Response {
+    let ctx = ui.ctx().clone();
+    let ppp = ctx.pixels_per_point();
+    let want = (size * ppp).round().max(1.0) as u32;
+    let (px, bytes) = ICONS.iter().min_by_key(|(n, _)| ((*n as i64 - want as i64).abs(), *n < want)).copied().unwrap_or(ICONS[0]);
+    let id = egui::Id::unique(("app-icon", px));
+    let tex: egui::TextureHandle = match ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        Some(t) => t,
+        None => {
+            let img = image::load_from_memory(bytes).map(|i| i.to_rgba8()).unwrap_or_else(|_| image::RgbaImage::new(1, 1));
+            let color = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
+            let t = ctx.load_texture(format!("app-icon-{px}"), color, egui::TextureOptions::LINEAR);
+            ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+            t
+        }
+    };
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    // Snap to the physical pixel grid and draw at the texture's own pixel size when it is close to what is wanted.
+    let min = pos2((rect.min.x * ppp).round() / ppp, (rect.min.y * ppp).round() / ppp);
+    let drawn = if px == want { px as f32 / ppp } else { size };
+    let target = Rect::from_min_size(min, Vec2::splat(drawn));
+    ui.painter().image(tex.id(), target, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    resp
 }
 
 /// `theme::button` derives its id from the label alone, so two buttons with the same text in one frame share
