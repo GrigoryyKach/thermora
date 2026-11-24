@@ -104,6 +104,10 @@ impl App {
                 return;
             }
             self.access.busy = Some(action);
+            if action == Action::Disable {
+                // Stop this process from starting the helper again through its task while it is being removed.
+                crate::sensors::link::set_enabled(false);
+            }
             self.access.msg = None;
             let (tx, rx) = channel();
             self.access.rx = Some(rx);

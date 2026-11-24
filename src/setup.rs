@@ -214,10 +214,97 @@ mod imp {
         1
     }
 
-    fn stop_helper() {
+    /// Stops the scheduled task (so it cannot start the helper again by itself).
+    fn stop_task() -> Result<(), String> {
+        // `/End` fails when the task is not running: that is fine.
         let _ = quiet("schtasks.exe").args(["/End", "/TN", proto::TASK_NAME]).status();
-        let _ = quiet("taskkill.exe").args(["/F", "/IM", SENSOR_EXE]).status();
-        std::thread::sleep(std::time::Duration::from_millis(400));
+        Ok(())
+    }
+
+    /// Kills every `ThermoraSensor.exe` whose image is inside `dir`, each by its own PID (not by name).
+    fn kill_helpers(dir: &Path) -> Result<(), String> {
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+        use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE};
+        let want = dir.display().to_string().to_lowercase();
+        let mut failed = Vec::new();
+        // SAFETY: a ToolHelp snapshot walked with the documented first/next calls; every handle is closed.
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snap == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+                return Err("cannot list processes".into());
+            }
+            let mut e: PROCESSENTRY32W = std::mem::zeroed();
+            e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+            let mut ok = Process32FirstW(snap, &mut e) != 0;
+            while ok {
+                let n = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(e.szExeFile.len());
+                if String::from_utf16_lossy(&e.szExeFile[..n]).eq_ignore_ascii_case(SENSOR_EXE) {
+                    let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, 0, e.th32ProcessID);
+                    if !h.is_null() {
+                        let mut buf = [0u16; 520];
+                        let mut len = buf.len() as u32;
+                        let inside = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut len) != 0 && String::from_utf16_lossy(&buf[..len as usize]).to_lowercase().starts_with(&want);
+                        if inside && TerminateProcess(h, 0) == 0 {
+                            failed.push(e.th32ProcessID);
+                        }
+                        CloseHandle(h);
+                    } else {
+                        failed.push(e.th32ProcessID);
+                    }
+                }
+                ok = Process32NextW(snap, &mut e) != 0;
+            }
+            CloseHandle(snap);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if failed.is_empty() { Ok(()) } else { Err(format!("could not end the helper (pid {failed:?})")) }
+    }
+
+    fn delete_task() -> Result<(), String> {
+        let st = quiet("schtasks.exe").args(["/Delete", "/TN", proto::TASK_NAME, "/F"]).status().map_err(|e| e.to_string())?;
+        // "Does not exist" counts as deleted.
+        if st.success() || !task_exists() { Ok(()) } else { Err("the scheduled task could not be deleted".into()) }
+    }
+
+    /// Deletes the program folder, retrying a few times (a helper that just ended may still hold its files).
+    fn delete_folder(dir: &Path) -> Result<(), String> {
+        let mut last = String::new();
+        for _ in 0..12 {
+            match std::fs::remove_dir_all(dir) {
+                Ok(()) => return Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(e) => {
+                    last = e.to_string();
+                    // A helper restarted in the meantime would block the delete: end it again.
+                    let _ = kill_helpers(dir);
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                }
+            }
+        }
+        Err(format!("the helper folder could not be removed: {last}"))
+    }
+
+    /// The Disable steps, in the order they must run: a running helper holds its files and a live task would start
+    /// it again, so stop the task, end the helper by PID, delete the task, then delete the folder.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum RemoveStep {
+        StopTask,
+        KillHelper,
+        DeleteTask,
+        DeleteFolder,
+    }
+
+    pub const REMOVE_ORDER: [RemoveStep; 4] = [RemoveStep::StopTask, RemoveStep::KillHelper, RemoveStep::DeleteTask, RemoveStep::DeleteFolder];
+
+    /// Runs all steps in order, never skipping a later one because an earlier one failed; returns every error.
+    pub fn run_remove(exec: &mut dyn FnMut(RemoveStep) -> Result<(), String>) -> Result<(), String> {
+        let mut errors = Vec::new();
+        for step in REMOVE_ORDER {
+            if let Err(e) = exec(step) {
+                errors.push(e);
+            }
+        }
+        if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
     }
 
     fn install_pawnio(tmp: &Path) -> Result<(), String> {
@@ -300,10 +387,21 @@ mod imp {
         let dir = pf_dir();
         let has = |f: &str| args.iter().any(|a| a == f);
         if has("--remove-sensor") {
-            stop_helper();
-            let _ = quiet("schtasks.exe").args(["/Delete", "/TN", proto::TASK_NAME, "/F"]).status();
-            let _ = std::fs::remove_dir_all(&dir);
-            return if installed_sensor().exists() { fail(&result, "the helper files could not be removed") } else { 0 };
+            let r = run_remove(&mut |step| match step {
+                RemoveStep::StopTask => stop_task(),
+                RemoveStep::KillHelper => kill_helpers(&dir),
+                RemoveStep::DeleteTask => delete_task(),
+                RemoveStep::DeleteFolder => {
+                    // The task is gone now, so nothing starts the helper again; end any straggler, then delete.
+                    kill_helpers(&dir)?;
+                    delete_folder(&dir)
+                }
+            });
+            return match r {
+                Ok(()) if !dir.exists() => 0,
+                Ok(()) => fail(&result, "the helper folder is still there"),
+                Err(e) => fail(&result, &e),
+            };
         }
         let refresh_only = has("--refresh-sensor");
         let Some(src) = bundled_sensor() else { return fail(&result, "ThermoraSensor.exe is missing next to Thermora.exe") };
@@ -325,7 +423,10 @@ mod imp {
             }
         }
         let _ = std::fs::remove_dir_all(&tmp);
-        stop_helper();
+        let _ = stop_task();
+        if let Err(e) = kill_helpers(&dir) {
+            return fail(&result, &e);
+        }
         if let Err(e) = std::fs::copy(&src, dir.join(SENSOR_EXE)) {
             return fail(&result, &format!("cannot copy the helper: {e}"));
         }
@@ -359,6 +460,28 @@ mod imp {
         fn xml_special_characters_are_escaped() {
             let x = task_xml("S-1", Path::new(r"C:\A&B\x.exe"));
             assert!(x.contains("C:\\A&amp;B\\x.exe"));
+        }
+
+        #[test]
+        fn disable_runs_its_steps_in_order_and_does_not_stop_at_the_first_error() {
+            let mut seen = Vec::new();
+            let r = run_remove(&mut |s| {
+                seen.push(s);
+                if s == RemoveStep::KillHelper { Err("pid 1 would not end".into()) } else { Ok(()) }
+            });
+            assert_eq!(seen, vec![RemoveStep::StopTask, RemoveStep::KillHelper, RemoveStep::DeleteTask, RemoveStep::DeleteFolder]);
+            assert!(r.unwrap_err().contains("would not end"), "the error reaches the caller (and so the window)");
+            assert_eq!(run_remove(&mut |_| Ok(())), Ok(()));
+        }
+
+        #[test]
+        fn deleting_a_missing_folder_is_fine_and_a_real_one_goes() {
+            let d = std::env::temp_dir().join(format!("thermora-del-{}", std::process::id()));
+            assert_eq!(delete_folder(&d), Ok(()));
+            std::fs::create_dir_all(d.join("modules")).unwrap();
+            std::fs::write(d.join("modules").join("x.bin"), b"x").unwrap();
+            assert_eq!(delete_folder(&d), Ok(()));
+            assert!(!d.exists());
         }
 
         #[test]
