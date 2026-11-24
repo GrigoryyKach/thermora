@@ -1,4 +1,5 @@
 /target
+/sensor/target
 *.log
 .claude/
 /tmp-data/

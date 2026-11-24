@@ -1,0 +1,23 @@
+[package]
+name = "thermora-sensor"
+version = "1.0.0"
+edition = "2021"
+description = "Thermora sensor helper: reads CPU temperature and power through PawnIO and serves them to Thermora"
+build = "build.rs"
+
+[[bin]]
+name = "ThermoraSensor"
+path = "src/main.rs"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_System_IO",
+    "Win32_Security", "Win32_Security_Authorization", "Win32_System_Pipes",
+] }
+
+[profile.release]
+opt-level = "s"
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"

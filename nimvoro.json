@@ -1,0 +1,147 @@
+{
+  "schema": 1,
+  "id": "thermora",
+  "name": "Thermora",
+  "tagline": "Live load and temperatures of every component",
+  "description": "Thermora is a small hardware monitor. It shows the load, temperature, clock and power of your processor and graphics card, memory use, network speed and the activity and temperature of every drive, all live, with a 60 second chart for each. A System specs page lists every component of the computer with its exact model, and a click opens the details: cores, caches and codename, video memory and driver, board and BIOS, each memory module, each drive with its health, audio devices and network adapters. The CPU temperature on Windows needs a small signed driver (PawnIO) and a helper; Thermora asks first, installs only the official file after checking its checksum, and works without it. Everything stays on your PC: no serial numbers, MAC addresses or public IP are ever read.",
+  "features": [
+    {
+      "title": "Every component, live",
+      "text": "Ring gauges and 60 second charts for the processor, graphics card, memory, network and every drive. Temperatures show in three comfort bands, and a reading a device cannot give is a dash with the reason, never a made-up zero."
+    },
+    {
+      "title": "CPU and GPU hotspot",
+      "text": "The package temperature and the hottest core of the processor, and the core, hotspot and memory junction of an NVIDIA graphics card, with clock, power, fan and video memory."
+    },
+    {
+      "title": "System specs",
+      "text": "A device list grouped like a PC builder's sheet: processor, graphics, motherboard, memory modules, drives, audio and network. Click a row and the details slide in. Copy the whole list as plain text without serial numbers."
+    },
+    {
+      "title": "Drives and their health",
+      "text": "Activity, read and write speed, temperature, free space per volume, and for NVMe drives the health, wear, hours and data written, with no driver."
+    },
+    {
+      "title": "CPU temperature, with your consent",
+      "text": "Windows does not let apps read processor sensors. Thermora can install the signed PawnIO driver and a tiny helper once, with one permission prompt, and turn it off again in Settings. Until then everything else works."
+    },
+    {
+      "title": "Lives in the tray",
+      "text": "Start it with the system and it waits in the tray with the CPU and GPU temperature in the tooltip. The window opens when you ask and closes completely."
+    }
+  ],
+  "category": "Utilities",
+  "accent": [
+    "#f5813f",
+    "#c2560c"
+  ],
+  "icon": "assets/icon.png",
+  "screenshots": [
+    "assets/screenshots/dark-en-monitor.png",
+    "assets/screenshots/dark-en-specs.png",
+    "assets/screenshots/light-en-monitor.png",
+    "assets/screenshots/light-en-specs.png",
+    "assets/screenshots/dark-ru-monitor.png",
+    "assets/screenshots/dark-en-settings.png"
+  ],
+  "exe": "Thermora.exe",
+  "asset": "Thermora-win-x64.zip",
+  "platforms": [
+    "windows",
+    "linux"
+  ],
+  "requirements": [
+    "Windows 10/11 x64",
+    "For the CPU temperature: an Intel processor, the PawnIO driver and one permission prompt (Thermora downloads the official installer and checks it first)"
+  ],
+  "linux": {
+    "asset": "Thermora-linux-x64.tar.gz",
+    "exe": "thermora",
+    "requirements": [
+      "Linux x86_64 (X11 or Wayland) with GTK 3 and libayatana-appindicator3 for the tray icon (GNOME also needs the AppIndicator extension). Temperatures come from the kernel (coretemp, k10temp, nvme, amdgpu) and need no root; power and memory module details need root"
+    ]
+  },
+  "settingsDir": "%APPDATA%\\Thermora",
+  "i18n": {
+    "ru": {
+      "tagline": "Нагрузка и температуры каждого компонента вживую",
+      "description": "Thermora — небольшой аппаратный монитор. Он показывает нагрузку, температуру, частоту и мощность процессора и видеокарты, использование памяти, скорость сети, а также активность и температуру каждого накопителя — всё вживую, с графиком за 60 секунд для каждого показателя. Страница «Характеристики системы» перечисляет все компоненты компьютера с точными названиями моделей, а по щелчку открываются подробности: ядра, кэш и кодовое имя, видеопамять и драйвер, плата и BIOS, каждый модуль памяти, каждый накопитель с состоянием, звуковые устройства и сетевые адаптеры. Для температуры процессора в Windows нужен небольшой подписанный драйвер (PawnIO) и помощник; Thermora сначала спрашивает, ставит только официальный файл после проверки контрольной суммы и работает и без него. Всё остаётся на вашем ПК: серийные номера, MAC-адреса и внешний IP не читаются никогда.",
+      "category": "Утилиты",
+      "features": [
+        {
+          "title": "Каждый компонент вживую",
+          "text": "Кольцевые индикаторы и графики за 60 секунд для процессора, видеокарты, памяти, сети и каждого накопителя. Температура показывается в трёх диапазонах, а значение, которое устройство не отдаёт, — это прочерк с причиной, а не выдуманный нуль."
+        },
+        {
+          "title": "Процессор и горячая точка видеокарты",
+          "text": "Температура корпуса процессора и самого горячего ядра, а также ядро, горячая точка и память видеокарты NVIDIA, плюс частота, мощность, вентилятор и видеопамять."
+        },
+        {
+          "title": "Характеристики системы",
+          "text": "Список устройств, сгруппированный как лист сборщика ПК: процессор, видеокарта, материнская плата, модули памяти, накопители, звук и сеть. Щёлкните строку — справа выезжают подробности. Весь список копируется простым текстом без серийных номеров."
+        },
+        {
+          "title": "Накопители и их состояние",
+          "text": "Активность, скорость чтения и записи, температура, свободное место по томам, а для NVMe ещё состояние, износ, часы работы и записанные данные — без драйвера."
+        },
+        {
+          "title": "Температура процессора — с вашего согласия",
+          "text": "Windows не даёт программам читать датчики процессора. Thermora может один раз поставить подписанный драйвер PawnIO и крошечного помощника с одним запросом разрешения и снова отключить их в настройках. Пока этого нет, всё остальное работает."
+        },
+        {
+          "title": "Живёт в трее",
+          "text": "Запустите вместе с системой — Thermora будет ждать в трее с температурой процессора и видеокарты во всплывающей подсказке. Окно открывается по вашей просьбе и закрывается полностью."
+        }
+      ],
+      "requirements": [
+        "Windows 10/11 x64",
+        "Для температуры процессора: процессор Intel, драйвер PawnIO и один запрос разрешения (Thermora скачивает официальный установщик и проверяет его)"
+      ],
+      "linux": {
+        "requirements": [
+          "Linux x86_64 (X11 или Wayland), GTK 3 и libayatana-appindicator3 для значка в трее (в GNOME нужно расширение AppIndicator). Температуры берутся из ядра (coretemp, k10temp, nvme, amdgpu) и не требуют root; для мощности и данных модулей памяти нужен root"
+        ]
+      }
+    },
+    "uk": {
+      "tagline": "Навантаження та температури кожного компонента наживо",
+      "description": "Thermora — невеликий апаратний монітор. Він показує навантаження, температуру, частоту та потужність процесора й відеокарти, використання пам'яті, швидкість мережі, а також активність і температуру кожного накопичувача — усе наживо, з графіком за 60 секунд для кожного показника. Сторінка «Характеристики системи» перелічує всі компоненти комп'ютера з точними назвами моделей, а за клацанням відкриваються подробиці: ядра, кеш і кодова назва, відеопам'ять і драйвер, плата та BIOS, кожен модуль пам'яті, кожен накопичувач зі станом, звукові пристрої та мережеві адаптери. Для температури процесора в Windows потрібні невеликий підписаний драйвер (PawnIO) і помічник; Thermora спершу питає, ставить лише офіційний файл після перевірки контрольної суми й працює і без нього. Усе залишається на вашому ПК: серійні номери, MAC-адреси та зовнішня IP не читаються ніколи.",
+      "category": "Утиліти",
+      "features": [
+        {
+          "title": "Кожен компонент наживо",
+          "text": "Кільцеві індикатори та графіки за 60 секунд для процесора, відеокарти, пам'яті, мережі та кожного накопичувача. Температура показується в трьох діапазонах, а значення, яке пристрій не віддає, — це прочерк із причиною, а не вигаданий нуль."
+        },
+        {
+          "title": "Процесор і гаряча точка відеокарти",
+          "text": "Температура корпуса процесора та найгарячішого ядра, а також ядро, гаряча точка й пам'ять відеокарти NVIDIA, плюс частота, потужність, вентилятор і відеопам'ять."
+        },
+        {
+          "title": "Характеристики системи",
+          "text": "Список пристроїв, згрупований як аркуш збирача ПК: процесор, відеокарта, материнська плата, модулі пам'яті, накопичувачі, звук і мережа. Клацніть рядок — праворуч висуваються подробиці. Увесь список копіюється простим текстом без серійних номерів."
+        },
+        {
+          "title": "Накопичувачі та їхній стан",
+          "text": "Активність, швидкість читання й запису, температура, вільне місце за томами, а для NVMe ще стан, знос, години роботи та записані дані — без драйвера."
+        },
+        {
+          "title": "Температура процесора — за вашою згодою",
+          "text": "Windows не дозволяє програмам читати датчики процесора. Thermora може один раз поставити підписаний драйвер PawnIO і крихітного помічника з одним запитом дозволу й знову вимкнути їх у налаштуваннях. Поки цього немає, усе інше працює."
+        },
+        {
+          "title": "Живе в треї",
+          "text": "Запустіть разом із системою — Thermora чекатиме в треї з температурою процесора та відеокарти у спливній підказці. Вікно відкривається на ваше прохання й закривається повністю."
+        }
+      ],
+      "requirements": [
+        "Windows 10/11 x64",
+        "Для температури процесора: процесор Intel, драйвер PawnIO і один запит дозволу (Thermora завантажує офіційний інсталятор і перевіряє його)"
+      ],
+      "linux": {
+        "requirements": [
+          "Linux x86_64 (X11 або Wayland), GTK 3 і libayatana-appindicator3 для значка в треї (у GNOME потрібне розширення AppIndicator). Температури беруться з ядра (coretemp, k10temp, nvme, amdgpu) і не потребують root; для потужності та даних модулів пам'яті потрібен root"
+        ]
+      }
+    }
+  }
+}

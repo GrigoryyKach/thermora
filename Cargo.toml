@@ -1,26 +1,40 @@
 [package]
 name = "thermora"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
-description = "A hardware monitor: load, temperatures and specs of every component (T1 sensor prototype)"
+build = "build.rs"
+description = "A hardware monitor: live load and temperatures of every component, and the specs of this computer"
 
 [[bin]]
 name = "Thermora"
 path = "src/main.rs"
 
 [dependencies]
+dirs = "7.0.0"
+eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "glow", "clipboard", "links"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tray-icon = { version = "0.26.1", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png"] }
 nvml-wrapper = "0.11"
 libloading = "0.8"
 
 [target.'cfg(windows)'.dependencies]
+winreg = "0.56.0"
 wmi = "0.14"
-serde = { version = "1", features = ["derive"] }
-windows-sys = { version = "0.61", features = [
+windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_Performance",
     "Win32_System_ProcessStatus", "Win32_System_Power", "Win32_Storage_FileSystem", "Win32_System_IO",
-    "Win32_System_Ioctl", "Win32_Security", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis",
-    "Win32_Networking_WinSock", "Win32_System_Services", "Win32_System_Registry",
+    "Win32_System_Ioctl", "Win32_Security", "Win32_Security_Authorization", "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell",
+    "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_System_Pipes",
 ] }
+
+[target.'cfg(unix)'.dependencies]
+eframe = { version = "0.37.0", default-features = false, features = ["x11", "wayland"] }
+libc = "0.2"
+gtk = "0.18"
+tray-icon = { version = "0.26.1", default-features = false, features = ["libappindicator"] }
 
 [profile.release]
 opt-level = 3

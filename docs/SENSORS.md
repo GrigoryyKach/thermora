@@ -146,3 +146,11 @@ Needs root: RAPL `energy_uj` (since CVE-2020-8694), SMBIOS memory modules (`dmid
 2. GPU hotspot via NvAPI works here; memory junction and power draw do not on this board: "-" is a normal state, not an error.
 3. CPU package/hotspot temperature, package power and RAM timings are the only things behind the driver. CPU load, clock, everything else is driver-free.
 4. Audio and chipset need the two workarounds above, otherwise the lists show generic names.
+
+## T2: how the recommendation was built (2026-11-24)
+
+- `ThermoraSensor.exe` (folder `sensor/`, its own crate and version, about 600 KB, no dependencies besides `windows-sys`) is the whole elevated surface: open the PawnIO device, load the signed `IntelMSR` module, call only `ioctl_read_msr`, and write one text line per second to `\.\pipe\ThermoraSensor-<user SID>` (DACL: that user and SYSTEM only, remote clients refused, up to 4 readers: the window and the tray part). It exits 60 s after the last reader leaves and refuses to run unelevated (exit code 2). The line format is shared with the app through `sensor/src/proto.rs`.
+- Setup (`src/setup.rs`) runs elevated only after the in-app dialog and the Windows prompt: it installs PawnIO with the pinned official installer (`-install -silent`, as in its winget manifest), puts the helper and `modules\IntelMSR.bin` in `%ProgramFiles%\Thermora` and registers the scheduled task "Thermora Sensor" (this user, highest privileges, no trigger). The helper copy is refreshed only when its SHA-256 differs from the one next to `Thermora.exe` (Settings offers it; one prompt). Disable removes the task and the folder; PawnIO stays.
+- Pins: the installer and the modules zip are checked against the SHA-256 digests GitHub records for the release assets, which equal the `InstallerSha256` of the winget manifest (an independent copy kept by Microsoft's package repository). Nothing is downloaded or run without a matching hash.
+- Measured on the dev PC (release build, real sensors): the tray part 47 MB working set (33 MB private) and 0.8 % of one core; the open window 130 MB and about 5 % of one core (egui with OpenGL; the 80 MB target is met by the tray part, not by a visible window).
+- Not exercised on hardware yet: the elevated setup, the helper's pipe and the MSR reads need PawnIO and one permission prompt; they are tested live with the user present.
