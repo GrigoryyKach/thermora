@@ -78,6 +78,16 @@ fn from_rd(r: &Option<Rd<f32>>, f: impl Fn(f32) -> Val) -> Val {
 }
 
 impl App {
+    /// Does this reading get a tile? A value always does; a dash only when it needs an action or has shown a value
+    /// before in this session (so a reading the hardware can never give never appears).
+    fn is_visible(&self, label: &str, val: &Val) -> bool {
+        match val {
+            Val::Text(..) => true,
+            Val::Missing(Why::NotReported) => self.seen.borrow().contains(&format!("{}:{label}", self.scope.get())),
+            Val::Missing(_) => true,
+        }
+    }
+
     /// One small metric: a muted label over a mono value. Returns true when a dash that offers the access was clicked.
     fn tile(&self, ui: &mut Ui, p: &Pal, label: &str, val: Val, band: Option<(Band, &str)>) -> bool {
         let t = self.s();
@@ -86,9 +96,9 @@ impl App {
         // needs an action (CPU temperature before Enable) or is just starting.
         match &val {
             Val::Text(..) => {
-                self.seen.borrow_mut().insert(label.to_string());
+                self.seen.borrow_mut().insert(format!("{}:{label}", self.scope.get()));
             }
-            Val::Missing(Why::NotReported) if !self.seen.borrow().contains(label) => return false,
+            Val::Missing(Why::NotReported) if !self.seen.borrow().contains(&format!("{}:{label}", self.scope.get())) => return false,
             _ => {}
         }
         // A fixed slot, sized from the widest value of its kind in the tabular font, so a changing number never moves
@@ -181,7 +191,8 @@ impl App {
 
     // ───────────────────────── cards ─────────────────────────
 
-    fn cpu_card(&self, ui: &mut Ui, p: &Pal) -> bool {
+    fn cpu_card(&self, ui: &mut Ui, p: &Pal, extra: f32) -> bool {
+        self.scope.set("cpu");
         let t = self.s();
         let c = &self.live.cpu;
         let kind = SensorKind::from(c.vendor);
@@ -223,7 +234,7 @@ impl App {
         let loads: Vec<f32> = self.hist.cpu_load.iter().collect();
         self.legend(ui, p, &[(t.load, p.accent), (t.temperature, p.text2)]);
         ui.add_space(4.0);
-        self.chart(ui, p, &[(&loads, p.accent), (&temps, p.text2)], 100.0, 54.0);
+        self.chart(ui, p, &[(&loads, p.accent), (&temps, p.text2)], 100.0, 54.0 + extra);
         enable
     }
 
@@ -247,7 +258,8 @@ impl App {
         }
     }
 
-    fn gpu_card(&self, ui: &mut Ui, p: &Pal) {
+    fn gpu_card(&self, ui: &mut Ui, p: &Pal, extra: f32) {
+        self.scope.set("gpu");
         let t = self.s();
         let Some(g) = &self.live.gpu else {
             self.card_header(ui, p, Icon::Gpu, t.card_gpu, "");
@@ -258,33 +270,34 @@ impl App {
         ring_and_stats(ui, &mut |ui| self.ring_gauge(ui, p, "gpu-load", g.load, t.load, if ui.available_width() < 440.0 { 120.0 } else { 140.0 }), &mut |ui| {
             {
                 ui.spacing_mut().item_spacing.y = 8.0;
-                let temp = from_rd(&g.temp, |v| Val::Text(format!("{:.0} °C", glide(ui, "gpu-temp", v)), band_color(band(SensorKind::Gpu, v), p)));
                 let tb = g.temp.as_ref().and_then(|r| r.as_ref().ok()).map(|v| (band(SensorKind::Gpu, *v), band_name(t, band(SensorKind::Gpu, *v))));
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = 26.0;
-                    self.tile(ui, p, t.temperature, temp, tb);
-                    let hot = from_rd(&g.hotspot, |v| Val::Text(format!("{:.0} °C", glide(ui, "gpu-hot", v)), band_color(band(SensorKind::Gpu, v), p)));
-                    self.tile(ui, p, t.hotspot, hot, None);
-                });
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = 26.0;
-                    let mem = from_rd(&g.mem_temp, |v| Val::Text(format!("{:.0} °C", v), band_color(band(SensorKind::Gpu, v), p)));
-                    self.tile(ui, p, t.mem_junction, mem, None);
-                    let clock = from_rd(&g.clock_mhz, |m| Val::Text(fmt_mhz(glide(ui, "gpu-clock", m)), p.text));
-                    self.tile(ui, p, t.clock, clock, None);
-                });
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = 26.0;
-                    let power = match (&g.power, &g.power_limit) {
-                        (Some(Ok(w)), Some(Ok(l))) => Val::Text(format!("{:.0} / {:.0} W", glide(ui, "gpu-power", *w), l), p.text),
-                        (Some(Ok(w)), _) => Val::Text(format!("{:.0} W", w), p.text),
-                        (Some(Err(why)), _) => Val::Missing(*why),
-                        _ => Val::Missing(Why::NotReported),
-                    };
-                    self.tile(ui, p, t.power, power, None);
-                    let fan = from_rd(&g.fan, |f| Val::Text(format!("{:.0}%", f), p.text));
-                    self.tile(ui, p, t.fan, fan, None);
-                });
+                let temp = from_rd(&g.temp, |v| Val::Text(format!("{:.0} °C", glide(ui, "gpu-temp", v)), band_color(band(SensorKind::Gpu, v), p)));
+                let hot = from_rd(&g.hotspot, |v| Val::Text(format!("{:.0} °C", glide(ui, "gpu-hot", v)), band_color(band(SensorKind::Gpu, v), p)));
+                let mem = from_rd(&g.mem_temp, |v| Val::Text(format!("{:.0} °C", v), band_color(band(SensorKind::Gpu, v), p)));
+                let clock = from_rd(&g.clock_mhz, |m| Val::Text(fmt_mhz(glide(ui, "gpu-clock", m)), p.text));
+                let power = match (&g.power, &g.power_limit) {
+                    (Some(Ok(w)), Some(Ok(l))) => Val::Text(format!("{:.0} / {:.0} W", glide(ui, "gpu-power", *w), l), p.text),
+                    (Some(Ok(w)), _) => Val::Text(format!("{:.0} W", w), p.text),
+                    (Some(Err(why)), _) => Val::Missing(*why),
+                    _ => Val::Missing(Why::NotReported),
+                };
+                let fan = from_rd(&g.fan, |f| Val::Text(format!("{:.0}%", f), p.text));
+                // Readings this GPU never gives are left out, and the rest reflow in pairs.
+                let items: Vec<(&str, Val, Option<(Band, &str)>)> = vec![(t.temperature, temp, tb), (t.hotspot, hot, None), (t.mem_junction, mem, None), (t.clock, clock, None), (t.power, power, None), (t.fan, fan, None)]
+                    .into_iter()
+                    .filter(|(label, val, _)| self.is_visible(label, val))
+                    .collect();
+                let mut it = items.into_iter();
+                loop {
+                    let (Some(a), b) = (it.next(), it.next()) else { break };
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = 26.0;
+                        self.tile(ui, p, a.0, a.1, a.2);
+                        if let Some(b) = b {
+                            self.tile(ui, p, b.0, b.1, b.2);
+                        }
+                    });
+                }
             }
         });
         ui.add_space(12.0);
@@ -303,10 +316,11 @@ impl App {
         let temps: Vec<f32> = self.hist.gpu_temp.iter().collect();
         self.legend(ui, p, &[(t.load, p.accent), (t.temperature, p.text2)]);
         ui.add_space(4.0);
-        self.chart(ui, p, &[(&loads, p.accent), (&temps, p.text2)], 100.0, 40.0);
+        self.chart(ui, p, &[(&loads, p.accent), (&temps, p.text2)], 100.0, 40.0 + extra);
     }
 
-    fn ram_card(&self, ui: &mut Ui, p: &Pal) {
+    fn ram_card(&self, ui: &mut Ui, p: &Pal, extra: f32) {
+        self.scope.set("ram");
         let t = self.s();
         let r = &self.live.ram;
         self.card_header(ui, p, Icon::Ram, t.card_ram, "");
@@ -328,10 +342,11 @@ impl App {
         });
         ui.add_space(10.0);
         let h: Vec<f32> = self.hist.ram.iter().collect();
-        self.chart(ui, p, &[(&h, p.accent)], 100.0, 40.0);
+        self.chart(ui, p, &[(&h, p.accent)], 100.0, 40.0 + extra);
     }
 
-    fn net_card(&self, ui: &mut Ui, p: &Pal) {
+    fn net_card(&self, ui: &mut Ui, p: &Pal, extra: f32) {
+        self.scope.set("net");
         let t = self.s();
         let n = &self.live.net;
         self.card_header(ui, p, Icon::Network, t.card_net, if n.adapter.is_empty() { t.no_network } else { &n.adapter });
@@ -346,10 +361,11 @@ impl App {
         let max = down.iter().chain(up.iter()).cloned().fold(100_000.0, f32::max) * 1.15;
         self.legend(ui, p, &[(t.download, p.accent), (t.upload, p.text2)]);
         ui.add_space(4.0);
-        self.chart(ui, p, &[(&down, p.accent), (&up, p.text2)], max, 56.0);
+        self.chart(ui, p, &[(&down, p.accent), (&up, p.text2)], max, 56.0 + extra);
     }
 
     fn storage_card(&self, ui: &mut Ui, p: &Pal) {
+        self.scope.set("storage");
         let t = self.s();
         self.card_header(ui, p, Icon::Storage, t.card_storage, "");
         if self.live.disks.is_empty() {
@@ -464,9 +480,15 @@ impl App {
             // Two columns from about 790 px of usable width (a window of about 1120 px; the default 1180 has ~868); below that, one column. When a
             // card's inside is narrower than 372 px its gauge moves above its stats, so nothing overflows.
             let wide = ui.available_width() >= 790.0;
-            let narrow_cards = wide && (ui.available_width() - 14.0) / 2.0 - 34.0 < 372.0;
-            let top_h = if narrow_cards { 500.0 } else { 372.0 };
-            let card = |ui: &mut Ui, h: f32, add: &mut dyn FnMut(&mut Ui)| {
+            // Cards in one row share a height. Each card stores its natural content height (without the stretch);
+            // the next frame the shorter one stretches its 60 s chart by the difference. The natural height does not
+            // depend on the stretch, so the rows settle at once and never oscillate.
+            let nat = |k: &str| ctx.data(|d| d.get_temp::<f32>(egui::Id::unique(("card-nat", k)))).unwrap_or(0.0);
+            let (nc, ng, nr, nn) = (nat("cpu"), nat("gpu"), nat("ram"), nat("net"));
+            let (top, bot) = (nc.max(ng), nr.max(nn));
+            let (ec, eg) = if wide && nc > 0.0 && ng > 0.0 { (top - nc, top - ng) } else { (0.0, 0.0) };
+            let (er, en) = if wide && nr > 0.0 && nn > 0.0 { (bot - nr, bot - nn) } else { (0.0, 0.0) };
+            let card = |ui: &mut Ui, key: &str, extra: f32, add: &mut dyn FnMut(&mut Ui)| {
                 theme::card(p).inner_margin(Margin::same(16)).show(ui, |ui| {
                     // Exactly the width the grid gives: never wider, whatever the content, and clipped as a last resort.
                     let w = ui.available_width();
@@ -475,8 +497,15 @@ impl App {
                     // Clip by width only: the height is the scroll area's business.
                     let (m, c) = (ui.max_rect(), ui.clip_rect());
                     ui.set_clip_rect(egui::Rect::from_min_max(egui::pos2(m.left().max(c.left()), c.top()), egui::pos2(m.right().min(c.right()), c.bottom())));
-                    ui.set_min_height(h);
+                    let y0 = ui.cursor().top();
                     add(ui);
+                    let natural = (ui.min_rect().bottom() - y0 - extra).max(0.0);
+                    let id = egui::Id::unique(("card-nat", key));
+                    let old = ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(-1.0);
+                    if (old - natural).abs() > 0.5 {
+                        ui.ctx().data_mut(|d| d.insert_temp(id, natural));
+                        ui.ctx().request_repaint();
+                    }
                 });
             };
             let gap = 14.0;
@@ -485,25 +514,25 @@ impl App {
                 ui.columns(2, |cols| {
                     cols[0].spacing_mut().item_spacing.y = gap;
                     cols[1].spacing_mut().item_spacing.y = gap;
-                    card(&mut cols[0], top_h, &mut |ui| enable |= self.cpu_card(ui, p));
-                    card(&mut cols[1], top_h, &mut |ui| self.gpu_card(ui, p));
+                    card(&mut cols[0], "cpu", ec, &mut |ui| enable |= self.cpu_card(ui, p, ec));
+                    card(&mut cols[1], "gpu", eg, &mut |ui| self.gpu_card(ui, p, eg));
                 });
                 ui.add_space(gap);
                 ui.columns(2, |cols| {
-                    card(&mut cols[0], 222.0, &mut |ui| self.ram_card(ui, p));
-                    card(&mut cols[1], 222.0, &mut |ui| self.net_card(ui, p));
+                    card(&mut cols[0], "ram", er, &mut |ui| self.ram_card(ui, p, er));
+                    card(&mut cols[1], "net", en, &mut |ui| self.net_card(ui, p, en));
                 });
             } else {
-                card(ui, 372.0, &mut |ui| enable |= self.cpu_card(ui, p));
+                card(ui, "cpu", 0.0, &mut |ui| enable |= self.cpu_card(ui, p, 0.0));
                 ui.add_space(gap);
-                card(ui, 372.0, &mut |ui| self.gpu_card(ui, p));
+                card(ui, "gpu", 0.0, &mut |ui| self.gpu_card(ui, p, 0.0));
                 ui.add_space(gap);
-                card(ui, 222.0, &mut |ui| self.ram_card(ui, p));
+                card(ui, "ram", 0.0, &mut |ui| self.ram_card(ui, p, 0.0));
                 ui.add_space(gap);
-                card(ui, 222.0, &mut |ui| self.net_card(ui, p));
+                card(ui, "net", 0.0, &mut |ui| self.net_card(ui, p, 0.0));
             }
             ui.add_space(gap);
-            card(ui, 0.0, &mut |ui| self.storage_card(ui, p));
+            card(ui, "storage", 0.0, &mut |ui| self.storage_card(ui, p));
         });
         if enable {
             self.open_enable_dialog();

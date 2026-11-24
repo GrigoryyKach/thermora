@@ -89,6 +89,8 @@ pub struct App {
     pub access: access::State,
     /// Readings that showed a value at least once this session; a reading the hardware never gives stays hidden.
     pub seen: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// The card being drawn: part of the key of `seen`, so two cards with a tile of the same name do not share it.
+    pub scope: std::cell::Cell<&'static str>,
     visible: Arc<AtomicBool>,
     cfg_dirty: Option<f64>,
     shots: Option<Shots>,
@@ -161,6 +163,7 @@ impl App {
             settings: settings::State::new(),
             access: access::State::new(demo),
             seen: Default::default(),
+            scope: std::cell::Cell::new(""),
             visible,
             cfg_dirty,
             shots,
